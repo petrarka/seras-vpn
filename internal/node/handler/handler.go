@@ -6,10 +6,14 @@ import (
 	"time"
 
 	"github.com/kelindar/binary"
-	"seras-protocol/internal/transport/server/wss"
 	"seras-protocol/internal/tun"
 	"seras-protocol/pkg/taiga/msg"
 )
+
+// Connection interface for transport-agnostic handling
+type Connection interface {
+	Send(data []byte) error
+}
 
 // Handler processes packets between clients and TUN interface
 type Handler struct {
@@ -17,7 +21,7 @@ type Handler struct {
 	decoder    *msg.Decoder
 	privateKey msg.Key
 	// Map connection to its encoder (for responses)
-	connEncoders map[*wss.Connection]*msg.Encoder
+	connEncoders map[Connection]*msg.Encoder
 	mu           sync.RWMutex
 }
 
@@ -27,12 +31,12 @@ func NewHandler(t *tun.TUN, privateKey msg.Key) *Handler {
 		tun:          t,
 		decoder:      msg.NewDecoder(privateKey),
 		privateKey:   privateKey,
-		connEncoders: make(map[*wss.Connection]*msg.Encoder),
+		connEncoders: make(map[Connection]*msg.Encoder),
 	}
 }
 
 // HandleMessage processes incoming encrypted message from client
-func (h *Handler) HandleMessage(conn *wss.Connection, data []byte) {
+func (h *Handler) HandleMessage(conn Connection, data []byte) {
 	// Unmarshal wire format
 	rawMsg := &msg.RawMsg{}
 	if err := binary.Unmarshal(data, rawMsg); err != nil {
@@ -52,7 +56,7 @@ func (h *Handler) HandleMessage(conn *wss.Connection, data []byte) {
 }
 
 // handleHandshake processes client handshake and stores their public key
-func (h *Handler) handleHandshake(conn *wss.Connection, rawMsg *msg.RawMsg) {
+func (h *Handler) handleHandshake(conn Connection, rawMsg *msg.RawMsg) {
 	// Decrypt handshake
 	hs, err := h.decoder.DecryptHandshake(rawMsg)
 	if err != nil {
@@ -73,7 +77,7 @@ func (h *Handler) handleHandshake(conn *wss.Connection, rawMsg *msg.RawMsg) {
 }
 
 // sendHandshakeAck sends handshake acknowledgment to client
-func (h *Handler) sendHandshakeAck(conn *wss.Connection, clientPubKey *msg.Key, success bool, message string) {
+func (h *Handler) sendHandshakeAck(conn Connection, clientPubKey *msg.Key, success bool, message string) {
 	ack := &msg.HandshakeAck{
 		Success: success,
 		Message: message,
@@ -102,7 +106,7 @@ func (h *Handler) sendHandshakeAck(conn *wss.Connection, clientPubKey *msg.Key, 
 }
 
 // handleData processes VPN data packet
-func (h *Handler) handleData(conn *wss.Connection, rawMsg *msg.RawMsg) {
+func (h *Handler) handleData(conn Connection, rawMsg *msg.RawMsg) {
 	// Check if client has completed handshake
 	h.mu.RLock()
 	_, hasEncoder := h.connEncoders[conn]
@@ -138,7 +142,7 @@ func (h *Handler) handleData(conn *wss.Connection, rawMsg *msg.RawMsg) {
 }
 
 // StartTUNReader reads from TUN and sends to connected clients
-func (h *Handler) StartTUNReader(server *wss.Server) {
+func (h *Handler) StartTUNReader() {
 	buf := make([]byte, 1500)
 
 	for {
@@ -182,7 +186,7 @@ func (h *Handler) StartTUNReader(server *wss.Server) {
 }
 
 // RemoveConnection removes encoder for disconnected client
-func (h *Handler) RemoveConnection(conn *wss.Connection) {
+func (h *Handler) RemoveConnection(conn Connection) {
 	h.mu.Lock()
 	delete(h.connEncoders, conn)
 	h.mu.Unlock()

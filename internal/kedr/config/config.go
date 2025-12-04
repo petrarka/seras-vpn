@@ -4,6 +4,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+
+	"seras-protocol/internal/transport/client/udp"
 	"seras-protocol/internal/transport/client/wss"
 	"seras-protocol/pkg/taiga/msg"
 )
@@ -15,6 +17,7 @@ type TransportConfig interface {
 
 var ConnTypeMap = map[string]func() TransportConfig{
 	"wss": func() TransportConfig { return &wss.Config{} },
+	"udp": func() TransportConfig { return &udp.Config{} },
 }
 
 type ConnConfig struct {

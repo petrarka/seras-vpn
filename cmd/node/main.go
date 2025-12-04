@@ -7,6 +7,7 @@ import (
 	"github.com/joho/godotenv"
 	"seras-protocol/internal/node/config"
 	"seras-protocol/internal/node/handler"
+	"seras-protocol/internal/transport/server/udp"
 	"seras-protocol/internal/transport/server/wss"
 	"seras-protocol/internal/tun"
 )
@@ -23,7 +24,11 @@ func main() {
 		slog.Error("Failed to parse config", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("Config loaded", "listenAddr", cfg.ListenAddr, "tunIP", cfg.TunIP, "vpnSubnet", cfg.VPNSubnet)
+	slog.Info("Config loaded",
+		"transport", cfg.TransportType,
+		"listenAddr", cfg.ListenAddr,
+		"tunIP", cfg.TunIP,
+		"vpnSubnet", cfg.VPNSubnet)
 
 	// Create TUN interface for node with routing and NAT
 	tunDev, err := tun.NewNodeTUN(cfg.TunIP, cfg.VPNSubnet)
@@ -37,17 +42,47 @@ func main() {
 	// Create handler
 	h := handler.NewHandler(tunDev, cfg.PrivateKey)
 
-	// Create WebSocket server
-	server := wss.NewServer(cfg.ListenAddr, h.HandleMessage)
-	server.SetOnDisconnect(h.RemoveConnection)
+	// Start TUN reader in background
+	go h.StartTUNReader()
 
-	// Start TUN reader in background (client keys are received via handshake)
-	go h.StartTUNReader(server)
+	// Start server based on transport type
+	switch cfg.TransportType {
+	case "wss":
+		startWSSServer(cfg, h)
+	case "udp":
+		startUDPServer(cfg, h)
+	default:
+		slog.Error("Unknown transport type", "type", cfg.TransportType)
+		os.Exit(1)
+	}
+}
 
-	// Start WebSocket server (blocking)
-	slog.Info("Node running, waiting for client handshakes...")
+func startWSSServer(cfg *config.NodeConfig, h *handler.Handler) {
+	server := wss.NewServer(cfg.ListenAddr, func(conn *wss.Connection, data []byte) {
+		h.HandleMessage(conn, data)
+	})
+	server.SetOnDisconnect(func(conn *wss.Connection) {
+		h.RemoveConnection(conn)
+	})
+
+	slog.Info("Starting WSS server", "addr", cfg.ListenAddr)
 	if err := server.Start(); err != nil {
-		slog.Error("Server error", "error", err)
+		slog.Error("WSS server error", "error", err)
+		os.Exit(1)
+	}
+}
+
+func startUDPServer(cfg *config.NodeConfig, h *handler.Handler) {
+	server := udp.NewServer(cfg.ListenAddr, func(conn *udp.Connection, data []byte) {
+		h.HandleMessage(conn, data)
+	})
+	server.SetOnDisconnect(func(conn *udp.Connection) {
+		h.RemoveConnection(conn)
+	})
+
+	slog.Info("Starting UDP server", "addr", cfg.ListenAddr)
+	if err := server.Start(); err != nil {
+		slog.Error("UDP server error", "error", err)
 		os.Exit(1)
 	}
 }

@@ -4,15 +4,17 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+
 	"seras-protocol/pkg/taiga/msg"
 )
 
 type NodeConfig struct {
-	PrivateKey msg.Key // Node's private key for decryption
-	PublicKey  msg.Key // Node's public key (derived or provided)
-	ListenAddr string  // WebSocket listen address (e.g., ":8080")
-	TunIP      string  // IP for node's TUN interface (e.g., "11.0.0.1")
-	VPNSubnet  string  // VPN subnet for clients (e.g., "11.0.0.0/24")
+	PrivateKey    msg.Key // Node's private key for decryption
+	PublicKey     msg.Key // Node's public key (derived or provided)
+	TransportType string  // Transport type: "wss" or "udp"
+	ListenAddr    string  // Listen address (e.g., ":8080")
+	TunIP         string  // IP for node's TUN interface (e.g., "11.0.0.1")
+	VPNSubnet     string  // VPN subnet for clients (e.g., "11.0.0.0/24")
 }
 
 func ParseNodeConfigFromEnv() (*NodeConfig, error) {
@@ -39,6 +41,14 @@ func ParseNodeConfigFromEnv() (*NodeConfig, error) {
 		copy(publicKey[:], pubKeyBytes)
 	}
 
+	transportType := os.Getenv("TRANSPORT_TYPE")
+	if transportType == "" {
+		transportType = "wss" // default
+	}
+	if transportType != "wss" && transportType != "udp" {
+		return nil, fmt.Errorf("TRANSPORT_TYPE must be 'wss' or 'udp', got: %s", transportType)
+	}
+
 	listenAddr := os.Getenv("LISTEN_ADDR")
 	if listenAddr == "" {
 		listenAddr = ":8080"
@@ -55,10 +65,11 @@ func ParseNodeConfigFromEnv() (*NodeConfig, error) {
 	}
 
 	return &NodeConfig{
-		PrivateKey: privateKey,
-		PublicKey:  publicKey,
-		ListenAddr: listenAddr,
-		TunIP:      tunIP,
-		VPNSubnet:  vpnSubnet,
+		PrivateKey:    privateKey,
+		PublicKey:     publicKey,
+		TransportType: transportType,
+		ListenAddr:    listenAddr,
+		TunIP:         tunIP,
+		VPNSubnet:     vpnSubnet,
 	}, nil
 }
